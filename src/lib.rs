@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -12,6 +13,53 @@ pub struct BloomFilter {
 
 pub struct ThreadSafeBF {
     bf: Arc<RwLock<BloomFilter>>,
+}
+
+pub struct AtomicBloomFilter {
+    bit_array: Vec<AtomicBool>,
+    num_hashes: usize,
+    size: usize,
+}
+
+impl AtomicBloomFilter {
+    pub fn new(
+        size: usize,
+        num_hashes: usize, //hash_funcs: Vec<Box<dyn Fn(&[u8]) -> u64>>
+    ) -> Self {
+        AtomicBloomFilter {
+            bit_array: (0..size).map(|_| AtomicBool::new(false)).collect(),
+            num_hashes,
+            size,
+            //       hash_funcs,
+        }
+    }
+    fn hash(&self, item: &str, i: usize) -> usize {
+        let mut hasher = Sha256::new();
+        hasher.update(item.as_bytes());
+        hasher.update(i.to_le_bytes());
+        let hash_res = hasher.finalize();
+
+        let mut hash_val = [0u8; 8];
+        hash_val.copy_from_slice(&hash_res[0..8]); // Take the first 8 bytes of the hash
+        usize::from_le_bytes(hash_val) % self.size
+    }
+
+    pub fn set(&self, item: &str) {
+        for i in 0..self.num_hashes {
+            let idx: usize = self.hash(&item, i);
+            self.bit_array[idx].store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub fn test(&self, item: &str) -> bool {
+        for i in 0..self.num_hashes {
+            let idx: usize = self.hash(item, i);
+            if !self.bit_array[idx].load(Ordering::Relaxed) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 impl BloomFilter {
