@@ -216,4 +216,56 @@ mod tests {
         reader2.join().unwrap();
         reader3.join().unwrap();
     }
+
+    #[test]
+    fn test_concurrent_reads_and_writes_atomic() {
+        let bloom = Arc::new(AtomicBloomFilter::new(1000, 5));
+
+        let bloom_clone1 = Arc::clone(&bloom);
+        let bloom_clone2 = Arc::clone(&bloom);
+        let bloom_clone3 = Arc::clone(&bloom);
+        let bloom_clone4 = Arc::clone(&bloom);
+        let bloom_clone5 = Arc::clone(&bloom);
+
+        // Writer thread 1
+        let writer1 = thread::spawn(move || {
+            bloom_clone1.set("concurrent_item_1");
+            bloom_clone1.set("concurrent_item_2");
+        });
+
+        // Writer thread 2
+        let writer2 = thread::spawn(move || {
+            bloom_clone4.set("concurrent_item_3");
+            bloom_clone4.set("concurrent_item_4");
+        });
+
+        // Reader thread 1
+        let reader1 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(10)); // Sleep to allow writers to run first
+            assert!(bloom_clone2.test("concurrent_item_1"));
+            assert!(bloom_clone2.test("concurrent_item_2"));
+            assert!(!bloom_clone2.test("non_existent_item"));
+        });
+
+        // Reader thread 2
+        let reader2 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(20)); // Sleep to allow more time for writers
+            assert!(bloom_clone3.test("concurrent_item_3"));
+            assert!(bloom_clone3.test("concurrent_item_4"));
+        });
+
+        // Reader thread 3
+        let reader3 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(15)); // A different sleep time
+            assert!(bloom_clone5.test("concurrent_item_1"));
+            assert!(!bloom_clone5.test("non_existent_item2"));
+        });
+
+        // Join all threads to ensure the test completes
+        writer1.join().unwrap();
+        writer2.join().unwrap();
+        reader1.join().unwrap();
+        reader2.join().unwrap();
+        reader3.join().unwrap();
+    }
 }
