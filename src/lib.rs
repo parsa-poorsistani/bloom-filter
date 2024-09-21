@@ -1,17 +1,29 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, RwLock};
+
 use sha2::{Digest, Sha256};
 
 pub struct BloomFilter {
     bit_array: Vec<bool>,
     num_hashes: usize,
     size: usize,
+    //hash_funcs: Vec<Box<dyn Fn(&[u8]) -> u64>>,
+}
+
+pub struct ThreadSafeBF {
+    bf: Arc<RwLock<BloomFilter>>,
 }
 
 impl BloomFilter {
-    pub fn new(size: usize, num_hashes: usize) -> Self {
+    pub fn new(
+        size: usize,
+        num_hashes: usize, //hash_funcs: Vec<Box<dyn Fn(&[u8]) -> u64>>
+    ) -> Self {
         BloomFilter {
             bit_array: vec![false; size],
             num_hashes,
             size,
+            //       hash_funcs,
         }
     }
 
@@ -53,9 +65,27 @@ impl BloomFilter {
         true
     }
 
+    //For setting hash functions beside SHA256 by user
     pub fn set_hash_fn(&mut self, hashFn: Vec<Box<dyn Fn(&[u8]) -> u64>>) {}
     pub fn reset(&mut self) {
         self.bit_array.fill(false);
+    }
+}
+
+impl ThreadSafeBF {
+    pub fn new(size: usize, num_hashes: usize) -> Self {
+        Self {
+            bf: Arc::new(RwLock::new(BloomFilter::new(size, num_hashes))),
+        }
+    }
+    pub fn add(&self, item: &str) {
+        let mut bloom = self.bf.try_write().unwrap();
+        bloom.set(item);
+    }
+
+    pub fn test(&self, item: &str) -> bool {
+        let bloom = self.bf.try_read().unwrap();
+        bloom.test(item)
     }
 }
 
