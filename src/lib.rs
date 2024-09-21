@@ -1,5 +1,5 @@
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
+use std::thread;
 
 use sha2::{Digest, Sha256};
 
@@ -78,13 +78,18 @@ impl ThreadSafeBF {
             bf: Arc::new(RwLock::new(BloomFilter::new(size, num_hashes))),
         }
     }
-    pub fn add(&self, item: &str) {
-        let mut bloom = self.bf.try_write().unwrap();
-        bloom.set(item);
+    pub fn set(&self, item: &str) -> Result<(), String> {
+        match self.bf.write() {
+            Ok(mut blooom) => {
+                blooom.set(item);
+                Ok(())
+            }
+            Err(_) => Err("Failed to acquire write lock on BloomFilter. Lock is poisoned.".into()),
+        }
     }
 
     pub fn test(&self, item: &str) -> bool {
-        let bloom = self.bf.try_read().unwrap();
+        let bloom = self.bf.read().unwrap();
         bloom.test(item)
     }
 }
@@ -116,5 +121,51 @@ mod tests {
         assert!(bloom.test("orange"));
         // Due to the small size, "grape" might cause a false positive
         assert!(!bloom.test("grape"));
+    }
+
+    #[test]
+    fn test_concurrent_reads_and_writes() {
+        let bloom = Arc::new(ThreadSafeBF::new(1000, 5));
+
+        let bloom_clone1 = Arc::clone(&bloom);
+        let bloom_clone2 = Arc::clone(&bloom);
+        let bloom_clone3 = Arc::clone(&bloom);
+        let bloom_clone4 = Arc::clone(&bloom);
+        let bloom_clone5 = Arc::clone(&bloom);
+
+        let writer1 = thread::spawn(move || {
+            bloom_clone1.set("concurrent_item_1");
+            bloom_clone1.set("concurrent_item_2");
+        });
+
+        let writer2 = thread::spawn(move || {
+            bloom_clone4.set("concurrent_item_3");
+            bloom_clone4.set("concurrent_item_4");
+        });
+
+        let reader1 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(10));
+            assert!(bloom_clone2.test("concurrent_item_1"));
+            assert!(bloom_clone2.test("concurrent_item_2"));
+            assert!(!bloom_clone2.test("non_existent_item"));
+        });
+
+        let reader2 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(20));
+            assert!(bloom_clone3.test("concurrent_item_3"));
+            assert!(bloom_clone3.test("concurrent_item_4"));
+        });
+
+        let reader3 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(15));
+            assert!(bloom_clone5.test("concurrent_item_1"));
+            assert!(!bloom_clone5.test("non_existent_item2"));
+        });
+
+        writer1.join().unwrap();
+        writer2.join().unwrap();
+        reader1.join().unwrap();
+        reader2.join().unwrap();
+        reader3.join().unwrap();
     }
 }
