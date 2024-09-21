@@ -52,4 +52,39 @@ impl BloomFilter {
         }
         true
     }
+
+    pub fn set_hash_fn(&mut self, hashFn: Vec<Box<dyn Fn(&[u8]) -> u64>>) {}
+    pub fn reset(&mut self) {
+        self.bit_array.fill(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_and_test() {
+        let mut bloom = BloomFilter::new(100, 3);
+
+        bloom.set("foo");
+        bloom.set("bar");
+
+        assert!(bloom.test("foo"));
+        assert!(bloom.test("bar"));
+        assert!(!bloom.test("baz")); // "baz" should not be in the filter
+    }
+
+    #[test]
+    fn test_false_positive() {
+        let mut bloom = BloomFilter::new(10, 2);
+
+        bloom.set("apple");
+        bloom.set("orange");
+
+        assert!(bloom.test("apple"));
+        assert!(bloom.test("orange"));
+        // Due to the small size, "grape" might cause a false positive
+        assert!(!bloom.test("grape"));
+    }
 }
